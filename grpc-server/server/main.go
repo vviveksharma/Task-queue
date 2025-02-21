@@ -9,6 +9,7 @@ import (
 	"task-queue/grpc-server/models"
 	pb "task-queue/grpc-server/proto"
 	"task-queue/grpc-server/queue"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/segmentio/kafka-go"
@@ -38,6 +39,11 @@ func (s *Server) StartTask(ctx context.Context, req *pb.StartTaskRequest) (resp 
 	if req.Id == "" {
 		return nil, errors.New("error while validating the request id cannot be empty")
 	}
+
+	if req.Data == ""  {
+		return nil, errors.New("error while validating the request data cannot be empty")
+	}
+
 	transaction := s.DB.Begin()
 	if transaction.Error != nil {
 		return nil, errors.New("error while starting the transaction" + err.Error())
@@ -47,6 +53,7 @@ func (s *Server) StartTask(ctx context.Context, req *pb.StartTaskRequest) (resp 
 	addJob := transaction.Create(&models.DBJob{
 		Id:     uuid.MustParse(req.Id),
 		TaskId: taskid,
+		Data:   req.Data,
 		Status: STATE_PENDING,
 	})
 
@@ -55,9 +62,8 @@ func (s *Server) StartTask(ctx context.Context, req *pb.StartTaskRequest) (resp 
 	}
 	transaction.Commit()
 
-
 	err = queue.PublishMessageIntoQueue(s.KafkaConn, taskid.String())
-	if err != nil {	
+	if err != nil {
 		log.Println("error while publishing the message to the kafka topic: ", err)
 		return nil, errors.New("error while publishing the message to the kafka: " + err.Error())
 	}
@@ -68,25 +74,29 @@ func (s *Server) StartTask(ctx context.Context, req *pb.StartTaskRequest) (resp 
 	}, nil
 }
 
-func (s *Server) GetTaskStatus(ctx context.Context, req *pb.GetTaskStatusRequest) (resp *pb.GetTaskStatusResponse, err error) {
+func (s *Server) GetTaskStatus(req *pb.GetTaskStatusRequest, resp grpc.ServerStreamingServer[pb.GetTaskStatusResponse]) error {
 	if req.Id == "" {
-		return nil, errors.New("error while validating the request id cannot be empty")
+		return errors.New("error while validating the request id cannot be empty")
 	}
 	transaction := s.DB.Begin()
 	if transaction.Error != nil {
-		return nil, errors.New("error while starting the transaction" + err.Error())
+		return errors.New("error while starting the transaction" + transaction.Error.Error())
 	}
 	defer transaction.Rollback()
 	var statusResponse models.DBJob
-	status := transaction.Find(&statusResponse, models.DBJob{
-		TaskId: uuid.MustParse(req.Id),
-	})
-	if status.Error != nil {
-		return nil, errors.New("error while finding the job status: " + err.Error())
+	for {
+		status := transaction.Find(&statusResponse, models.DBJob{
+			TaskId: uuid.MustParse(req.Id),
+		})
+		if status.Error != nil {
+			return errors.New("error while finding the job status: " + status.Error.Error())
+		}
+		if statusResponse.Status == STATE_COMPLETED {
+			break
+		}
+		time.Sleep(2 * time.Second)
 	}
-	return &pb.GetTaskStatusResponse{
-		Status: statusResponse.Status,
-	}, nil
+	return nil
 }
 
 func main() {

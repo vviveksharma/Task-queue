@@ -6,9 +6,11 @@ import (
 )
 
 type DBJob struct {
-	Id     uuid.UUID `gorm:"primaryKey,column:id"`
-	TaskId uuid.UUID `gorm:"column:task_id;type:uuid"`
-	Status string    `gorm:"column:status;type:varchar(100);not null"`
+	Id       uuid.UUID `gorm:"primaryKey,column:id"`
+	TaskId   uuid.UUID `gorm:"column:task_id;type:uuid;not null"`
+	Status   string    `gorm:"column:status;type:varchar(100);not null"`
+	Data     string    `gorm:"column:data;type:text;not null"`
+	Response string    `gorm:"column:response;type:text"`
 }
 
 func (DBJob) TableName() string {

@@ -29,7 +29,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type TaskServiceClient interface {
 	StartTask(ctx context.Context, in *StartTaskRequest, opts ...grpc.CallOption) (*StartRequestResponse, error)
-	GetTaskStatus(ctx context.Context, in *GetTaskStatusRequest, opts ...grpc.CallOption) (*GetTaskStatusResponse, error)
+	GetTaskStatus(ctx context.Context, in *GetTaskStatusRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[GetTaskStatusResponse], error)
 	HealthCheck(ctx context.Context, in *NoParams, opts ...grpc.CallOption) (*HealthCheckResponse, error)
 }
 
@@ -51,15 +51,24 @@ func (c *taskServiceClient) StartTask(ctx context.Context, in *StartTaskRequest,
 	return out, nil
 }
 
-func (c *taskServiceClient) GetTaskStatus(ctx context.Context, in *GetTaskStatusRequest, opts ...grpc.CallOption) (*GetTaskStatusResponse, error) {
+func (c *taskServiceClient) GetTaskStatus(ctx context.Context, in *GetTaskStatusRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[GetTaskStatusResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetTaskStatusResponse)
-	err := c.cc.Invoke(ctx, TaskService_GetTaskStatus_FullMethodName, in, out, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &TaskService_ServiceDesc.Streams[0], TaskService_GetTaskStatus_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &grpc.GenericClientStream[GetTaskStatusRequest, GetTaskStatusResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
 }
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TaskService_GetTaskStatusClient = grpc.ServerStreamingClient[GetTaskStatusResponse]
 
 func (c *taskServiceClient) HealthCheck(ctx context.Context, in *NoParams, opts ...grpc.CallOption) (*HealthCheckResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -76,7 +85,7 @@ func (c *taskServiceClient) HealthCheck(ctx context.Context, in *NoParams, opts 
 // for forward compatibility.
 type TaskServiceServer interface {
 	StartTask(context.Context, *StartTaskRequest) (*StartRequestResponse, error)
-	GetTaskStatus(context.Context, *GetTaskStatusRequest) (*GetTaskStatusResponse, error)
+	GetTaskStatus(*GetTaskStatusRequest, grpc.ServerStreamingServer[GetTaskStatusResponse]) error
 	HealthCheck(context.Context, *NoParams) (*HealthCheckResponse, error)
 	mustEmbedUnimplementedTaskServiceServer()
 }
@@ -91,8 +100,8 @@ type UnimplementedTaskServiceServer struct{}
 func (UnimplementedTaskServiceServer) StartTask(context.Context, *StartTaskRequest) (*StartRequestResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StartTask not implemented")
 }
-func (UnimplementedTaskServiceServer) GetTaskStatus(context.Context, *GetTaskStatusRequest) (*GetTaskStatusResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetTaskStatus not implemented")
+func (UnimplementedTaskServiceServer) GetTaskStatus(*GetTaskStatusRequest, grpc.ServerStreamingServer[GetTaskStatusResponse]) error {
+	return status.Errorf(codes.Unimplemented, "method GetTaskStatus not implemented")
 }
 func (UnimplementedTaskServiceServer) HealthCheck(context.Context, *NoParams) (*HealthCheckResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HealthCheck not implemented")
@@ -136,23 +145,16 @@ func _TaskService_StartTask_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
-func _TaskService_GetTaskStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetTaskStatusRequest)
-	if err := dec(in); err != nil {
-		return nil, err
+func _TaskService_GetTaskStatus_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(GetTaskStatusRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
 	}
-	if interceptor == nil {
-		return srv.(TaskServiceServer).GetTaskStatus(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: TaskService_GetTaskStatus_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TaskServiceServer).GetTaskStatus(ctx, req.(*GetTaskStatusRequest))
-	}
-	return interceptor(ctx, in, info, handler)
+	return srv.(TaskServiceServer).GetTaskStatus(m, &grpc.GenericServerStream[GetTaskStatusRequest, GetTaskStatusResponse]{ServerStream: stream})
 }
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TaskService_GetTaskStatusServer = grpc.ServerStreamingServer[GetTaskStatusResponse]
 
 func _TaskService_HealthCheck_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(NoParams)
@@ -184,14 +186,16 @@ var TaskService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _TaskService_StartTask_Handler,
 		},
 		{
-			MethodName: "GetTaskStatus",
-			Handler:    _TaskService_GetTaskStatus_Handler,
-		},
-		{
 			MethodName: "HealthCheck",
 			Handler:    _TaskService_HealthCheck_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "GetTaskStatus",
+			Handler:       _TaskService_GetTaskStatus_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "task.proto",
 }

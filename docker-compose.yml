@@ -25,8 +25,11 @@ services:
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_LOG_RETENTION_HOURS: 168  # Keep logs for 7 days
+      KAFKA_LOG_RETENTION_HOURS: 168  
       KAFKA_JVM_PERFORMANCE_OPTS: "-XX:+UseContainerSupport -Xmx512M -Xms512M"
+      KAFKA_LOG_RETENTION_MS: 3600000    
+      KAFKA_LOG_RETENTION_BYTES: 524288000 
+      KAFKA_LOG_CLEANUP_POLICY: "delete"
     healthcheck:
       test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
       interval: 10s
