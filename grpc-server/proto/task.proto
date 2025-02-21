@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package task;
+
+option go_package = "./";
+
+service TaskService {
+    rpc StartTask(StartTaskRequest) returns (StartRequestResponse);
+    rpc GetTaskStatus (GetTaskStatusRequest) returns (GetTaskStatusResponse);
+    rpc HealthCheck(NoParams) returns (HealthCheckResponse);
+}
+
+message NoParams{};
+
+message HealthCheckResponse {
+    string message = 1;
+}
+
+message StartTaskRequest {
+    string id = 1;
+};
+
+message StartRequestResponse {
+    string message = 1;
+    string status = 2;
+};
+
+message GetTaskStatusRequest {
+    string id = 1;
+};
+
+message GetTaskStatusResponse {
+    string status = 1;
+}; 
