@@ -1,35 +1,53 @@
 package queue
 
 import (
-	"context"
 	"log"
-	"time"
 
-	"github.com/segmentio/kafka-go"
+	"github.com/streadway/amqp"
 )
 
-func Publisher() (conn *kafka.Conn, err error) {
-	topic := "task-queue"
-	partition := 0
+func Publisher() (conn *amqp.Connection, err error) {
 
-	conn, err = kafka.DialLeader(context.Background(), "tcp", "localhost:9092", topic, partition)
+	conn, err = amqp.Dial("amqp://admin:admin@localhost:5672/")
 	if err != nil {
-		log.Fatal("Failed to connect:", err)
-		return nil, err
+		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
 	}
-
-	// defer conn.Close()
-
 	return conn, nil
 }
 
-func PublishMessageIntoQueue(conn *kafka.Conn,taskId string) error{
-	conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	_, err := conn.WriteMessages(
-		kafka.Message{Key: []byte(taskId)},
-	)
+func PublishMessageIntoQueue(conn *amqp.Connection, taskId string) error {
+	ch, err := conn.Channel()
 	if err != nil {
-		log.Println("Failed to write messages:", err)
+		log.Println("error while creating channel: ", err)
+		return err
+	}
+	defer ch.Close()
+	_, err = ch.QueueDeclare(
+		"my_queue", // Queue name
+		false,      // Durable
+		false,      // Delete when unused
+		false,      // Exclusive
+		false,      // No-wait
+		nil,        // Arguments
+	)
+
+	if err != nil {
+		log.Println("error while declaring queue: ", err)
+		return err
+	}
+
+	Qerr := ch.Publish(
+		"",
+		"task-queue",
+		false,
+		false,
+		amqp.Publishing{
+			ContentType: "text/plain",
+			Body:        []byte(taskId),
+		},
+	)
+	if Qerr != nil {
+		log.Println("error while publishing the message on the queue: ", err)
 		return err
 	}
 	return nil

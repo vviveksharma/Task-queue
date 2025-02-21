@@ -1,47 +1,66 @@
 package queue
 
 import (
-	"context"
 	"fmt"
 	"log"
-	"task-queue/worker/models"
 	"task-queue/worker/jobs"
-	"time"
+	"task-queue/worker/models"
 
-	"github.com/segmentio/kafka-go"
+	"github.com/streadway/amqp"
 	"gorm.io/gorm"
 )
 
 func Queue(dbConn *gorm.DB) {
-	brokerAddress := "localhost:9092"
-	topic := "task-queue"
-	groupID := "task-consumer-group"
 
-	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:        []string{brokerAddress},
-		Topic:          topic,
-		GroupID:        groupID,
-		MinBytes:       10e3,
-		MaxBytes:       10e6,
-		CommitInterval: time.Second,
-		StartOffset:    kafka.FirstOffset,
-	})
-
-	fmt.Println("Kafka consumer started... Listening for messages...")
-
-	for {
-		msg, err := reader.ReadMessage(context.Background())
-		if err != nil {
-			log.Fatal("Error reading message:", err)
-			break
-		}
-
-		fmt.Printf("Received Task ID: %s\n", string(msg.Key))
-		processTask(dbConn, string(msg.Key))
-		if err := reader.CommitMessages(context.Background(), msg); err != nil {
-			log.Println("Failed to commit message:", err)
-		}
+	conn, err := amqp.Dial("amqp://admin:admin@localhost:5672")
+	if err != nil {
+		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
 	}
+	defer conn.Close()
+	ch, err := conn.Channel()
+	if err != nil {
+		log.Fatalf("Failed to open a channel: %v", err)
+	}
+	defer ch.Close()
+	_, err = ch.QueueDeclare(
+		"task-queue",
+		false,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		log.Fatalf("Failed to declare a queue: %v", err)
+	}
+
+	msgs, err := ch.Consume(
+		"task-queue",
+		"",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		log.Fatalf("Failed to register a consumer: %v", err)
+	}
+
+	fmt.Println(" [*] Waiting for messages. To exit press CTRL+C")
+
+	forever := make(chan bool)
+
+	go func() {
+		for msg := range msgs {
+			fmt.Printf(" [x] Received: %s\n", msg.Body)
+			fmt.Printf("Received Task ID: %s\n", string(msg.Body))
+			processTask(dbConn, string(msg.Body))
+		}
+	}()
+
+	<-forever
+
 }
 
 func processTask(dbConn *gorm.DB, taskID string) {
@@ -55,11 +74,11 @@ func processTask(dbConn *gorm.DB, taskID string) {
 		log.Println("error while fetching the task: ", task.Error)
 		return
 	}
-	go func ()  {
-		resp, err := jobs.RunSummarizer(taskResponse.Data, dbConn)	
+	go func() {
+		resp, err := jobs.RunSummarizer(taskResponse.Data, dbConn)
 		if err != nil {
 			log.Println("error while running the summarizer: ", err)
-			return 
+			return
 		}
 		taskResponse.Status = "COMPLETED"
 		taskResponse.Response = resp

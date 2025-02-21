@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/segmentio/kafka-go"
+	"github.com/streadway/amqp"
 	"google.golang.org/grpc"
 	"gorm.io/gorm"
 )
@@ -26,7 +26,7 @@ const (
 type Server struct {
 	pb.UnimplementedTaskServiceServer
 	DB        *gorm.DB
-	KafkaConn *kafka.Conn
+	MQConn *amqp.Connection
 }
 
 func (s *Server) HealthCheck(ctx context.Context, in *pb.NoParams) (*pb.HealthCheckResponse, error) {
@@ -40,7 +40,7 @@ func (s *Server) StartTask(ctx context.Context, req *pb.StartTaskRequest) (resp 
 		return nil, errors.New("error while validating the request id cannot be empty")
 	}
 
-	if req.Data == ""  {
+	if req.Data == "" {
 		return nil, errors.New("error while validating the request data cannot be empty")
 	}
 
@@ -62,7 +62,7 @@ func (s *Server) StartTask(ctx context.Context, req *pb.StartTaskRequest) (resp 
 	}
 	transaction.Commit()
 
-	err = queue.PublishMessageIntoQueue(s.KafkaConn, taskid.String())
+	err = queue.PublishMessageIntoQueue(s.MQConn, taskid.String())
 	if err != nil {
 		log.Println("error while publishing the message to the kafka topic: ", err)
 		return nil, errors.New("error while publishing the message to the kafka: " + err.Error())
@@ -107,7 +107,7 @@ func main() {
 		log.Fatal("error while starting the kafka connection: ", err)
 	}
 
-	ser.KafkaConn = qconn
+	ser.MQConn = qconn
 
 	db, err := db.NewDbRequest()
 	if err != nil {
